@@ -179,3 +179,558 @@ const SPREADS = {
   3: ['过去', '现在', '未来'],
   5: ['现状', '挑战', '根基', '建议', '结果'],
 };
+
+
+// =============================================
+// 粒子系统
+// =============================================
+class ParticleSystem {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.particles = [];
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.resize();
+    this.init();
+    window.addEventListener('resize', () => this.resize());
+    document.addEventListener('mousemove', e => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+    });
+  }
+
+  resize() {
+    this.canvas.width = window.innerWidth;
+    this.canvas.height = window.innerHeight;
+  }
+
+  init() {
+    for (let i = 0; i < 120; i++) {
+      this.addParticle();
+    }
+  }
+
+  addParticle(x, y, burst = false) {
+    const colors = ['#c9a84c', '#a855f7', '#06b6d4', '#e2d9f3', '#f0d080', '#be185d'];
+    this.particles.push({
+      x: x || Math.random() * this.canvas.width,
+      y: y || Math.random() * this.canvas.height,
+      vx: (Math.random() - 0.5) * (burst ? 4 : 0.6),
+      vy: (Math.random() - 0.5) * (burst ? 4 : 0.6) - (burst ? 0 : 0.2),
+      size: Math.random() * (burst ? 4 : 3) + 0.5,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      alpha: burst ? 1 : Math.random() * 0.6 + 0.2,
+      life: burst ? 1 : -1,
+      decay: burst ? 0.015 : 0,
+      twinkle: Math.random() * Math.PI * 2,
+      twinkleSpeed: Math.random() * 0.05 + 0.01,
+      mouseInfluence: Math.random() * 0.001,
+    });
+  }
+
+  burst(x, y, count = 30) {
+    for (let i = 0; i < count; i++) {
+      this.addParticle(x, y, true);
+    }
+  }
+
+  update() {
+    this.particles = this.particles.filter(p => p.life === -1 || p.alpha > 0);
+    if (this.particles.filter(p => p.life === -1).length < 120) {
+      this.addParticle();
+    }
+    for (const p of this.particles) {
+      if (p.life !== -1) {
+        p.alpha -= p.decay;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy -= 0.05;
+      } else {
+        const dx = this.mouseX - p.x;
+        const dy = this.mouseY - p.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 150) {
+          p.vx += dx * p.mouseInfluence;
+          p.vy += dy * p.mouseInfluence;
+        }
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.twinkle += p.twinkleSpeed;
+        p.alpha = (0.3 + Math.sin(p.twinkle) * 0.25);
+        if (p.x < 0) p.x = this.canvas.width;
+        if (p.x > this.canvas.width) p.x = 0;
+        if (p.y < 0) p.y = this.canvas.height;
+        if (p.y > this.canvas.height) p.y = 0;
+      }
+    }
+  }
+
+  draw() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    for (const p of this.particles) {
+      this.ctx.save();
+      this.ctx.globalAlpha = Math.max(0, p.alpha);
+      this.ctx.fillStyle = p.color;
+      this.ctx.shadowBlur = p.size * 3;
+      this.ctx.shadowColor = p.color;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      this.ctx.fill();
+      this.ctx.restore();
+    }
+  }
+
+  loop() {
+    this.update();
+    this.draw();
+    requestAnimationFrame(() => this.loop());
+  }
+}
+
+// =============================================
+// 手势识别器
+// =============================================
+class GestureDetector {
+  constructor(onGesture) {
+    this.onGesture = onGesture;
+    this.currentGesture = null;
+    this.fistStartTime = null;
+    this.fistHoldDuration = 1500;
+    this.hands = null;
+    this.camera = null;
+    this.isRunning = false;
+    this.progressCallback = null;
+  }
+
+  async start(videoEl, canvasEl) {
+    if (!window.Hands) {
+      console.warn('MediaPipe Hands not loaded');
+      return false;
+    }
+    this.videoEl = videoEl;
+    this.canvasEl = canvasEl;
+    this.canvasCtx = canvasEl.getContext('2d');
+    this.hands = new Hands({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`,
+    });
+    this.hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5,
+    });
+    this.hands.onResults(results => this.processResults(results));
+    try {
+      this.camera = new Camera(videoEl, {
+        onFrame: async () => { await this.hands.send({ image: videoEl }); },
+        width: 640,
+        height: 480,
+      });
+      await this.camera.start();
+      this.isRunning = true;
+      return true;
+    } catch (e) {
+      console.error('Camera start failed:', e);
+      return false;
+    }
+  }
+
+  stop() {
+    if (this.camera) {
+      this.camera.stop();
+      this.isRunning = false;
+    }
+  }
+
+  processResults(results) {
+    const canvas = this.canvasEl;
+    const ctx = this.canvasCtx;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+      this.setGesture('none');
+      return;
+    }
+    const landmarks = results.multiHandLandmarks[0];
+    if (window.drawConnectors && window.drawLandmarks) {
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {
+        color: 'rgba(201, 168, 76, 0.6)',
+        lineWidth: 2,
+      });
+      drawLandmarks(ctx, landmarks, {
+        color: 'rgba(168, 85, 247, 0.8)',
+        lineWidth: 1,
+        radius: 4,
+      });
+    }
+    const gesture = this.analyzeGesture(landmarks);
+    this.setGesture(gesture);
+  }
+
+  analyzeGesture(landmarks) {
+    const tips = [8, 12, 16, 20];
+    const pips = [6, 10, 14, 18];
+    let closedFingers = 0;
+    for (let i = 0; i < 4; i++) {
+      if (landmarks[tips[i]].y > landmarks[pips[i]].y) {
+        closedFingers++;
+      }
+    }
+    const thumbTip = landmarks[4];
+    const thumbMcp = landmarks[2];
+    const thumbClosed = thumbTip.x > thumbMcp.x;
+    if (closedFingers >= 3) return 'fist';
+    if (closedFingers <= 1) return 'open';
+    return 'partial';
+  }
+
+  setGesture(gesture) {
+    if (gesture === 'fist') {
+      if (!this.fistStartTime) {
+        this.fistStartTime = Date.now();
+      }
+      const elapsed = Date.now() - this.fistStartTime;
+      const progress = Math.min(elapsed / this.fistHoldDuration, 1);
+      if (this.progressCallback) this.progressCallback(progress);
+      if (progress >= 1) {
+        this.fistStartTime = null;
+        this.onGesture('fist_complete');
+      }
+    } else {
+      this.fistStartTime = null;
+      if (this.progressCallback) this.progressCallback(0);
+    }
+    this.currentGesture = gesture;
+    if (this.gestureChangeCallback) this.gestureChangeCallback(gesture);
+  }
+}
+
+// =============================================
+// 应用主逻辑
+// =============================================
+class TarotApp {
+  constructor() {
+    this.currentSpread = 1;
+    this.drawMethod = 'gesture';
+    this.drawnCards = [];
+    this.flippedCount = 0;
+    this.apiKey = localStorage.getItem('tarot_api_key') || '';
+    this.particles = null;
+    this.gestureDetector = null;
+    this.init();
+  }
+
+  init() {
+    const canvas = document.getElementById('particleCanvas');
+    this.particles = new ParticleSystem(canvas);
+    this.particles.loop();
+    this.runLoadingSequence();
+    this.bindEvents();
+  }
+
+  runLoadingSequence() {
+    const fill = document.getElementById('loadingFill');
+    const text = document.getElementById('loadingText');
+    const steps = [
+      { pct: 20, msg: '正在连接星辰...' },
+      { pct: 45, msg: '解锁命运之眼...' },
+      { pct: 70, msg: '召唤塔罗能量...' },
+      { pct: 90, msg: '准备牌阵...' },
+      { pct: 100, msg: '一切就绪，命运等待揭晓' },
+    ];
+    let i = 0;
+    const next = () => {
+      if (i >= steps.length) {
+        setTimeout(() => this.showScreen('mainScreen'), 800);
+        return;
+      }
+      fill.style.width = steps[i].pct + '%';
+      text.textContent = steps[i].msg;
+      i++;
+      setTimeout(next, 600);
+    };
+    setTimeout(next, 400);
+  }
+
+  bindEvents() {
+    document.querySelectorAll('.spread-option').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.spread-option').forEach(o => o.classList.remove('active'));
+        el.classList.add('active');
+        this.currentSpread = parseInt(el.dataset.spread);
+      });
+    });
+    document.querySelectorAll('.method-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.method-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.drawMethod = btn.dataset.method;
+      });
+    });
+    document.getElementById('beginBtn').addEventListener('click', () => { this.startReading(); });
+    document.getElementById('backBtn').addEventListener('click', () => { this.stopGesture(); this.showScreen('mainScreen'); });
+    document.getElementById('backBtn2').addEventListener('click', () => { this.showScreen('mainScreen'); });
+    document.getElementById('cardDeck').addEventListener('click', () => { this.drawCardClick(); });
+    document.getElementById('confirmDrawBtn').addEventListener('click', () => { this.showRevealScreen(); });
+    document.getElementById('interpretBtn').addEventListener('click', () => { this.startReading_interpret(); });
+    document.getElementById('newReadingBtn').addEventListener('click', () => { this.resetAll(); });
+    document.getElementById('settingsBtn').addEventListener('click', () => { document.getElementById('apiModal').classList.add('open'); });
+    document.getElementById('saveApiKey').addEventListener('click', () => {
+      const key = document.getElementById('apiKeyInput').value.trim();
+      if (key) { this.apiKey = key; localStorage.setItem('tarot_api_key', key); }
+      document.getElementById('apiModal').classList.remove('open');
+    });
+    document.getElementById('skipApiKey').addEventListener('click', () => { document.getElementById('apiModal').classList.remove('open'); });
+    document.getElementById('apiModal').addEventListener('click', e => { if (e.target === document.getElementById('apiModal')) { document.getElementById('apiModal').classList.remove('open'); } });
+    if (!this.apiKey) { setTimeout(() => { document.getElementById('apiModal').classList.add('open'); }, 3500); } else { document.getElementById('apiKeyInput').value = this.apiKey; }
+  }
+
+  showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+  }
+
+  startReading() {
+    this.drawnCards = [];
+    this.flippedCount = 0;
+    if (this.drawMethod === 'gesture') { this.showGestureScreen(); } else { this.showClickScreen(); }
+  }
+
+  async showGestureScreen() {
+    this.showScreen('gestureScreen');
+    this.gestureDrawCount = 0;
+    this.targetCount = this.currentSpread;
+    const videoEl = document.getElementById('webcam');
+    const canvasEl = document.getElementById('handCanvas');
+    const statusOrb = document.getElementById('statusOrb');
+    const gestureText = document.getElementById('gestureText');
+    const progressContainer = document.getElementById('gestureProgress');
+    const progressRing = document.getElementById('progressRing');
+    const ringText = document.getElementById('ringText');
+    const syncSize = () => { canvasEl.width = videoEl.videoWidth || 480; canvasEl.height = videoEl.videoHeight || 360; };
+    videoEl.addEventListener('loadedmetadata', syncSize);
+    this.gestureDetector = new GestureDetector(async (event) => {
+      if (event === 'fist_complete') {
+        if (this.gestureDrawCount < this.targetCount) {
+          this.gestureDrawCount++;
+          const card = this.drawRandomCard();
+          this.drawnCards.push(card);
+          gestureText.textContent = `✓ 已抽取第 ${this.gestureDrawCount} 张！${this.gestureDrawCount < this.targetCount ? ' 请继续握拳抽取...' : ''}`;
+          progressContainer.style.display = 'none';
+          const rect = document.getElementById('gestureScreen').getBoundingClientRect();
+          this.particles.burst(rect.width / 2, rect.height / 2, 40);
+          if (this.gestureDrawCount >= this.targetCount) {
+            statusOrb.className = 'status-orb open';
+            gestureText.textContent = '✦ 命运已选择，即将揭示...';
+            await this.sleep(1200);
+            this.stopGesture();
+            this.showRevealScreen();
+          } else { statusOrb.className = 'status-orb detecting'; }
+        }
+      }
+    });
+    this.gestureDetector.gestureChangeCallback = (gesture) => {
+      if (this.gestureDrawCount >= this.targetCount) return;
+      if (gesture === 'none') { statusOrb.className = 'status-orb'; gestureText.textContent = '正在寻找手掌...'; progressContainer.style.display = 'none'; }
+      else if (gesture === 'open') { statusOrb.className = 'status-orb open'; gestureText.textContent = `手掌已检测 ✓  握拳以抽取第 ${this.gestureDrawCount + 1} 张牌`; progressContainer.style.display = 'none'; }
+      else if (gesture === 'fist' || gesture === 'partial') { statusOrb.className = 'status-orb fist'; gestureText.textContent = '正在感应...握紧！'; progressContainer.style.display = 'flex'; }
+    };
+    this.gestureDetector.progressCallback = (progress) => {
+      const circumference = 276.5;
+      const offset = circumference - circumference * progress;
+      progressRing.style.strokeDashoffset = offset;
+      const pct = Math.round(progress * 100);
+      ringText.innerHTML = pct < 100 ? `${pct}%` : '✓';
+    };
+    const success = await this.gestureDetector.start(videoEl, canvasEl);
+    if (!success) { gestureText.textContent = '摄像头初始化失败，请使用意念抽牌'; statusOrb.className = 'status-orb'; setTimeout(() => { this.stopGesture(); this.showClickScreen(); }, 2000); }
+    else { gestureText.textContent = `请展开手掌，准备抽取第 1 张牌`; statusOrb.className = 'status-orb detecting'; }
+  }
+
+  stopGesture() {
+    if (this.gestureDetector) { this.gestureDetector.stop(); this.gestureDetector = null; }
+    const video = document.getElementById('webcam');
+    if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  }
+
+  showClickScreen() {
+    this.showScreen('clickScreen');
+    this.clickDrawCount = 0;
+    document.getElementById('cardsNeeded').textContent = this.currentSpread;
+    document.getElementById('drawnCards').innerHTML = '';
+    document.getElementById('confirmDrawBtn').style.display = 'none';
+  }
+
+  drawCardClick() {
+    if (this.clickDrawCount >= this.currentSpread) return;
+    const card = this.drawRandomCard();
+    this.drawnCards.push(card);
+    this.clickDrawCount++;
+    const drawn = document.getElementById('drawnCards');
+    const mini = document.createElement('div');
+    mini.className = 'drawn-mini-card';
+    mini.style.animationDelay = `${(this.clickDrawCount - 1) * 0.1}s`;
+    drawn.appendChild(mini);
+    const rect = document.getElementById('cardDeck').getBoundingClientRect();
+    this.particles.burst(rect.left + rect.width / 2, rect.top + rect.height / 2, 20);
+    document.getElementById('cardsNeeded').textContent = this.currentSpread - this.clickDrawCount;
+    if (this.clickDrawCount >= this.currentSpread) {
+      document.getElementById('cardDeck').style.opacity = '0.4';
+      document.getElementById('cardDeck').style.pointerEvents = 'none';
+      document.getElementById('confirmDrawBtn').style.display = 'block';
+      setTimeout(() => { document.getElementById('confirmDrawBtn').style.opacity = '1'; }, 100);
+    }
+  }
+
+  drawRandomCard() {
+    const usedIds = this.drawnCards.map(c => c.id);
+    let available = TAROT_CARDS.filter(c => !usedIds.includes(c.id));
+    const card = available[Math.floor(Math.random() * available.length)];
+    return { ...card, reversed: Math.random() > 0.6 };
+  }
+
+  showRevealScreen() {
+    this.showScreen('revealScreen');
+    const area = document.getElementById('cardsRevealArea');
+    area.innerHTML = '';
+    this.flippedCount = 0;
+    const positions = SPREADS[this.currentSpread] || ['指引'];
+    this.drawnCards.forEach((card, i) => {
+      const el = document.createElement('div');
+      el.className = 'reveal-card';
+      el.style.animationDelay = `${i * 0.15}s`;
+      el.innerHTML = `
+        <div class="reveal-card-inner">
+          <div class="reveal-card-back">
+            <div class="card-symbol">🔮</div>
+            <div class="card-back-pattern"></div>
+          </div>
+          <div class="reveal-card-front ${card.reversed ? 'reversed' : ''}">
+            <div class="card-image-container">
+              <img src="${card.image}" alt="${card.name}" class="card-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+              <div class="card-emoji-fallback" style="display:none;">${card.emoji}</div>
+            </div>
+            <div class="card-name">${card.name}</div>
+            <div class="card-position-label">${positions[i] || ''}</div>
+            ${card.reversed ? '<div class="card-reversed-badge">逆位</div>' : ''}
+          </div>
+        </div>
+      `;
+      el.addEventListener('click', () => this.flipCard(el, card, i));
+      area.appendChild(el);
+      setTimeout(() => { el.style.opacity = '1'; el.style.transform = 'translateY(0)'; }, i * 200);
+    });
+  }
+
+  flipCard(el, card, index) {
+    if (el.classList.contains('flipped')) return;
+    el.classList.add('flipped');
+    this.flippedCount++;
+    const rect = el.getBoundingClientRect();
+    this.particles.burst(rect.left + rect.width / 2, rect.top + rect.height / 2, 25);
+    if (this.flippedCount >= this.drawnCards.length) {
+      setTimeout(() => {
+        document.getElementById('interpretBtn').style.display = 'block';
+        document.getElementById('interpretBtn').style.animation = 'fadeIn 0.5s ease';
+      }, 400);
+    }
+  }
+
+  startReading_interpret() {
+    this.showScreen('readingScreen');
+    const summary = document.getElementById('cardsSummary');
+    const positions = SPREADS[this.currentSpread] || ['指引'];
+    summary.innerHTML = this.drawnCards.map((c, i) => `
+      <div class="summary-card ${c.reversed ? 'reversed' : ''}">
+        <div class="s-image-container">
+          <img src="${c.image}" alt="${c.name}" class="s-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+          <div class="s-emoji" style="display:none;">${c.emoji}</div>
+        </div>
+        <div class="s-name">${c.name}</div>
+        <div class="s-pos">${positions[i] || ''} ${c.reversed ? '(逆)' : ''}</div>
+      </div>
+    `).join('');
+    document.getElementById('readingContent').innerHTML = '<div class="reading-loading" id="readingLoading"><div class="crystal-ball"><div class="crystal-inner"></div><div class="crystal-shimmer"></div></div><p>星辰正在解读你的命运...</p></div>';
+    const question = document.getElementById('questionInput').value.trim();
+    if (this.apiKey && this.apiKey.startsWith('sk-')) { this.callOpenAI(question); } else { setTimeout(() => this.generateLocalReading(question), 1800); }
+  }
+
+  async callOpenAI(question) {
+    const positions = SPREADS[this.currentSpread] || ['指引'];
+    const cardDescriptions = this.drawnCards.map((c, i) => `位置"${positions[i]}": ${c.name}${c.reversed ? '(逆位)' : '(正位)'} - 关键词: ${c.keywords.join('、')}`).join('\n');
+    const prompt = `你是一位充满智慧的塔罗牌占卜师，用诗意而深刻的语言为用户解读塔罗牌。用户的问题：${question || '无特定问题，请给予整体人生指引'} 抽到的牌：${cardDescriptions} 请用神秘优美的中文，分别解读每张牌在其位置上的含义，然后给出综合解读。`;
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.apiKey}` },
+        body: JSON.stringify({ model: 'gpt-3.5-turbo', messages: [{ role: 'user', content: prompt }], max_tokens: 800, temperature: 0.85 }),
+      });
+      if (!response.ok) throw new Error('API Error');
+      const data = await response.json();
+      const text = data.choices[0].message.content;
+      this.displayReadingWithTypewriter(text);
+    } catch (e) { console.error('OpenAI error:', e); this.generateLocalReading(document.getElementById('questionInput').value); }
+  }
+
+  generateLocalReading(question) {
+    const positions = SPREADS[this.currentSpread] || ['指引'];
+    const opening = MYSTICAL_PHRASES.openings[Math.floor(Math.random() * MYSTICAL_PHRASES.openings.length)];
+    let html = '<div class="reading-text-content">';
+    html += `<p class="opening-phrase typewriter-cursor">${opening}</p>`;
+    if (question) { html += `<h3>✦ 你的问题</h3><p>「${question}」<br><br>星辰已感知你的疑问，塔罗牌将作为命运的信使，为你揭示隐藏在时间长河中的答案...</p>`; }
+    else { html += `<p>在这神圣的时刻，塔罗牌将为你映照出命运的镜像。请以开放的心接收这些来自宇宙的智慧...</p>`; }
+    this.drawnCards.forEach((card, i) => {
+      const meaning = card.reversed ? card.reversed : card.upright;
+      const pos = positions[i] || '指引';
+      const cardIntro = MYSTICAL_PHRASES.cardIntro[Math.floor(Math.random() * MYSTICAL_PHRASES.cardIntro.length)].replace('{position}', pos);
+      const prefixType = card.reversed ? 'reversedPrefix' : 'uprightPrefix';
+      const prefix = MYSTICAL_PHRASES[prefixType][Math.floor(Math.random() * MYSTICAL_PHRASES[prefixType].length)].replace('{name}', card.name);
+      const elementInfo = MYSTICAL_PHRASES.elementInterpretations[card.suit] || '';
+      html += `<div class="card-reading-section"><div class="card-reading-title">${card.emoji} ${cardIntro}</div><div class="card-reading-subtitle">${card.name}${card.reversed ? ' 【逆位】' : ' 【正位】'}</div><div class="card-reading-text"><span class="reading-prefix">${prefix}</span><br><br>${meaning}<br><br><em class="element-note">${elementInfo}。${card.keywords.slice(0, 2).join('与')}的能量正在你的生命中流动，请感受它的共鸣...</em></div></div>`;
+    });
+    html += `<h3>✦ 命运的连线</h3>`;
+    const connection = MYSTICAL_PHRASES.connections[Math.floor(Math.random() * MYSTICAL_PHRASES.connections.length)];
+    html += `<p>${connection}</p>`;
+    const cardNames = this.drawnCards.map(c => c.name).join('、');
+    const cardKeywords = this.drawnCards.flatMap(c => c.keywords.slice(0, 2)).slice(0, 6).join('、');
+    const elements = this.drawnCards.map(c => c.suit);
+    const hasMultipleSuits = new Set(elements).size > 1;
+    if (hasMultipleSuits) { html += `<p>多元素的牌组出现在你的牌阵中，这意味着生命的不同层面正在交织——${cardKeywords}。这些能量共同构成了你此刻命运的完整图景。</p>`; }
+    else { const dominantElement = MYSTICAL_PHRASES.elementInterpretations[elements[0]] || ''; html += `<p>同一元素的牌组显现，暗示着能量的集中。${dominantElement}。这是命运在向你强调某个特定领域的重要性。</p>`; }
+    const reversedCount = this.drawnCards.filter(c => c.reversed).length;
+    if (reversedCount === 0) { html += `<p>所有牌都以正位出现，这是一个非常积极的信号！宇宙正在向你传递祝福与肯定的讯息。</p>`; }
+    else if (reversedCount === this.drawnCards.length) { html += `<p>多张逆位牌的出现并非凶兆，而是命运的温柔提醒——有些内在的功课需要被看见和转化。</p>`; }
+    else { html += `<p>正逆位交织的牌阵如同生命的起伏，提醒我们光与影都是成长不可或缺的部分。</p>`; }
+    html += `<h3>✦ 星辰的总结</h3>`;
+    html += `<p>综合${cardNames}的启示，命运的画卷在你面前徐徐展开。每一张牌都是一面镜子，映照出你灵魂深处的某个面向。请记住，塔罗牌不是预言，而是照见——真正的力量永远在你手中。`;
+    if (question) { html += `<br><br>针对你的问题，星辰的建议是：信任这个过程，答案已经在你的心中。如果仍然感到迷茫，不妨在安静的时刻冥想这张最能触动你的牌，它的智慧将向你诉说更深层的话语。</p>`; }
+    else { html += `<br><br>此刻，宇宙邀请你关注生命中正在流动的${cardKeywords}能量。这不是命令，而是温柔的提示——你有自由选择如何回应。</p>`; }
+    const closing = MYSTICAL_PHRASES.closings[Math.floor(Math.random() * MYSTICAL_PHRASES.closings.length)];
+    html += `<div class="closing-phrase"><p>${closing}</p></div>`;
+    html += '</div>';
+    document.getElementById('readingContent').innerHTML = html;
+  }
+
+  displayReadingWithTypewriter(text) {
+    const content = document.getElementById('readingContent');
+    const formatted = text.split('\n').filter(line => line.trim()).map(line => `<p>${line}</p>`).join('');
+    content.innerHTML = `<div class="reading-text-content">${formatted}</div>`;
+  }
+
+  resetAll() {
+    this.drawnCards = [];
+    this.flippedCount = 0;
+    this.stopGesture();
+    document.getElementById('cardDeck').style.opacity = '1';
+    document.getElementById('cardDeck').style.pointerEvents = 'auto';
+    document.getElementById('drawnCards').innerHTML = '';
+    document.getElementById('confirmDrawBtn').style.display = 'none';
+    this.showScreen('mainScreen');
+  }
+
+  sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+}
+
+window.addEventListener('DOMContentLoaded', () => { new TarotApp(); });
