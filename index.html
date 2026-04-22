@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>神秘塔罗 · 命运之眼</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="particleCanvas"></canvas>
+<div class="diffuse-bg">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+  <div class="orb orb4"></div>
+</div>
+
+<!-- 加载界面 -->
+<div id="loadingScreen" class="screen active">
+  <div class="loading-content">
+    <div class="eye-symbol">
+      <div class="eye-outer">
+        <div class="eye-inner">
+          <div class="pupil">
+            <div class="pupil-shine"></div>
+          </div>
+        </div>
+      </div>
+      <div class="eye-rays">
+        <span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+    <h1 class="title-main">神秘塔罗</h1>
+    <p class="title-sub">命运之眼为你揭示答案</p>
+    <div class="loading-bar"><div class="loading-fill" id="loadingFill"></div></div>
+    <p class="loading-text" id="loadingText">正在连接星辰...</p>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="mainScreen" class="screen">
+  <div class="header">
+    <div class="star-icon">✦</div>
+    <h2>神秘塔罗</h2>
+    <div class="star-icon">✦</div>
+  </div>
+  <div class="question-section">
+    <p class="prompt-text">请将你的问题注入星辰...</p>
+    <textarea id="questionInput" placeholder="在这里输入你想询问的问题，或留空感受宇宙的指引..."></textarea>
+  </div>
+  <div class="spread-selector">
+    <p class="section-label">✧ 选择牌阵 ✧</p>
+    <div class="spread-options">
+      <div class="spread-option active" data-spread="1">
+        <div class="spread-preview single">
+          <div class="mini-card"></div>
+        </div>
+        <span>单张指引</span>
+      </div>
+      <div class="spread-option" data-spread="3">
+        <div class="spread-preview triple">
+          <div class="mini-card"></div>
+          <div class="mini-card"></div>
+          <div class="mini-card"></div>
+        </div>
+        <span>过去·现在·未来</span>
+      </div>
+      <div class="spread-option" data-spread="5">
+        <div class="spread-preview five">
+          <div class="mini-card"></div>
+          <div class="mini-card"></div>
+          <div class="mini-card center"></div>
+          <div class="mini-card"></div>
+          <div class="mini-card"></div>
+        </div>
+        <span>五芒星牌阵</span>
+      </div>
+    </div>
+  </div>
+  <div class="method-selector">
+    <p class="section-label">✧ 选择抽牌方式 ✧</p>
+    <div class="method-options">
+      <button class="method-btn active" id="gestureBtn" data-method="gesture">
+        <span class="method-icon">🤚</span>
+        <span>手势抽牌</span>
+      </button>
+      <button class="method-btn" id="clickBtn" data-method="click">
+        <span class="method-icon">✨</span>
+        <span>意念抽牌</span>
+      </button>
+    </div>
+  </div>
+  <button class="begin-btn" id="beginBtn">
+    <span class="btn-glow"></span>
+    <span class="btn-text">⬡ 开启占卜 ⬡</span>
+  </button>
+</div>
+
+<!-- 手势界面 -->
+<div id="gestureScreen" class="screen">
+  <div class="gesture-header">
+    <h2>凝视星辰，展开手掌</h2>
+    <p>张开手掌 → 保持聚焦 → 握拳抽取</p>
+  </div>
+  <div class="camera-container">
+    <video id="webcam" autoplay playsinline muted></video>
+    <canvas id="handCanvas"></canvas>
+    <div class="camera-overlay">
+      <div class="scan-line"></div>
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+    </div>
+    <div class="gesture-status" id="gestureStatus">
+      <div class="status-orb" id="statusOrb"></div>
+      <span id="gestureText">正在启动摄像头...</span>
+    </div>
+    <div class="gesture-progress-container" id="gestureProgress" style="display:none">
+      <div class="gesture-progress-ring">
+        <svg viewBox="0 0 100 100">
+          <circle class="ring-bg" cx="50" cy="50" r="44"/>
+          <circle class="ring-fill" id="progressRing" cx="50" cy="50" r="44" stroke-dasharray="276.5" stroke-dashoffset="276.5"/>
+        </svg>
+        <div class="ring-text" id="ringText">握拳<br>抽牌</div>
+      </div>
+    </div>
+  </div>
+  <div class="cards-floating" id="cardsFloating">
+    <div class="float-card" style="--delay:0s;--rot:-20deg;--tx:-160px;--ty:-20px"></div>
+    <div class="float-card" style="--delay:0.15s;--rot:-8deg;--tx:-60px;--ty:10px"></div>
+    <div class="float-card center-card" style="--delay:0.3s;--rot:0deg;--tx:0px;--ty:-30px"></div>
+    <div class="float-card" style="--delay:0.45s;--rot:8deg;--tx:60px;--ty:10px"></div>
+    <div class="float-card" style="--delay:0.6s;--rot:20deg;--tx:160px;--ty:-20px"></div>
+  </div>
+  <button class="back-btn" id="backBtn">← 返回</button>
+</div>
+
+<!-- 意念抽牌界面 -->
+<div id="clickScreen" class="screen">
+  <div class="click-header">
+    <h2>凝神静气，触碰牌面</h2>
+    <p>专注你的问题，感受每张牌的能量，点击抽取</p>
+  </div>
+  <div class="deck-container" id="deckContainer">
+    <div class="card-deck" id="cardDeck">
+      <div class="deck-glow"></div>
+    </div>
+    <p class="deck-hint">点击牌堆抽取 <span id="cardsNeeded">1</span> 张</p>
+    <div class="drawn-cards" id="drawnCards"></div>
+  </div>
+  <button class="confirm-draw-btn" id="confirmDrawBtn" style="display:none">
+    <span class="btn-glow"></span>
+    <span>揭示命运</span>
+  </button>
+  <button class="back-btn" id="backBtn2">← 返回</button>
+</div>
+
+<!-- 翻牌界面 -->
+<div id="revealScreen" class="screen">
+  <div class="reveal-header">
+    <h2>✦ 命运已显现 ✦</h2>
+    <p>点击每张牌揭示其奥秘</p>
+  </div>
+  <div class="cards-reveal-area" id="cardsRevealArea"></div>
+  <div class="reveal-actions">
+    <button class="interpret-btn" id="interpretBtn" style="display:none">
+      <span class="btn-glow"></span>
+      <span>🔮 解读命运</span>
+    </button>
+  </div>
+</div>
+
+<!-- 解读界面 -->
+<div id="readingScreen" class="screen">
+  <div class="reading-container">
+    <div class="reading-header">
+      <div class="mystical-symbol">☽◉☾</div>
+      <h2>命运解读</h2>
+    </div>
+    <div class="cards-summary" id="cardsSummary"></div>
+    <div class="reading-content" id="readingContent">
+      <div class="reading-loading" id="readingLoading">
+        <div class="crystal-ball">
+          <div class="crystal-inner"></div>
+          <div class="crystal-shimmer"></div>
+        </div>
+        <p>星辰正在解读你的命运...</p>
+      </div>
+    </div>
+    <div class="reading-actions">
+      <button class="new-reading-btn" id="newReadingBtn">⟳ 重新占卜</button>
+    </div>
+  </div>
+</div>
+
+<!-- API Key 配置 Modal -->
+<div id="apiModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-glow"></div>
+    <h3>🔮 配置 AI 神谕</h3>
+    <p>输入 OpenAI API Key 以获得更深层的命运解读</p>
+    <input type="password" id="apiKeyInput" placeholder="sk-...">
+    <div class="modal-btns">
+      <button id="saveApiKey" class="primary-modal-btn">保存密钥</button>
+      <button id="skipApiKey" class="secondary-modal-btn">使用本地解读</button>
+    </div>
+  </div>
+</div>
+
+<button class="settings-btn" id="settingsBtn" title="配置 AI">⚙</button>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="app.js"></script>
+</body>
+</html>
